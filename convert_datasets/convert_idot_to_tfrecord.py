@@ -30,11 +30,11 @@ def create_tf_example(frame, label_map_dict):
     encoded_image_data = fid.read() # Encoded image bytes
   image_format = b'jpeg' # b'jpeg' or b'png'
 
-  xmins = [bbox[0] for bbox in frame['bboxes']] # List of normalized left x coordinates in bounding box (1 per box)
-  xmaxs = [bbox[2] for bbox in frame['bboxes']] # List of normalized right x coordinates in bounding box
+  xmins = [float(bbox[0]) / width for bbox in frame['bboxes']] # List of normalized left x coordinates in bounding box (1 per box)
+  xmaxs = [float(bbox[2]) / width for bbox in frame['bboxes']] # List of normalized right x coordinates in bounding box
              # (1 per box)
-  ymins = [bbox[1] for bbox in frame['bboxes']] # List of normalized top y coordinates in bounding box (1 per box)
-  ymaxs = [bbox[3] for bbox in frame['bboxes']] # List of normalized bottom y coordinates in bounding box
+  ymins = [float(bbox[1]) / height for bbox in frame['bboxes']] # List of normalized top y coordinates in bounding box (1 per box)
+  ymaxs = [float(bbox[3]) / height for bbox in frame['bboxes']] # List of normalized bottom y coordinates in bounding box
              # (1 per box)
   classes_text = [name.encode() for name in frame['names']] # List of string class name of bounding box (1 per box)
   classes = [label_map_dict[name] for name in frame['names']] # List of integer class id of bounding box (1 per box)
@@ -61,13 +61,13 @@ def main(_):
 
   # TODO(user): Write code to read in your dataset to examples variable
 
-  frames = parse_pascal_voc_groundtruth(FLAGS.annotation_dir).values()
+  frames = parse_pascal_voc_groundtruth(FLAGS.annotation_dir)
   if FLAGS.imageset_txt != '':
     train_set = np.genfromtxt(FLAGS.imageset_txt, dtype=np.int)
   else:
     train_set = None
   label_map_dict = label_map_util.get_label_map_dict(FLAGS.label_map_path)
-  for frame in frames:
+  for frame in frames.values():
     if train_set is None or int(frame['frame_id']) in train_set:
       tf_example = create_tf_example(frame, label_map_dict)
       writer.write(tf_example.SerializeToString())

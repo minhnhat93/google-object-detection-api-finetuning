@@ -95,3 +95,10 @@ ENV/
 # Rope project settings
 .ropeproject
 
+/models/rfcn_resnet101_idot/frozen_inference_graph.pb
+/models/rfcn_resnet101_idot/train/
+/models/rfcn_resnet101_idot/eval/
+/data/idot_train.record
+/data/idot_test.record
+/models/faster_rcnn_resnet101/eval/
+/models/faster_rcnn_resnet101/train/
