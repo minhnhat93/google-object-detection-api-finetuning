@@ -11,7 +11,7 @@ CUDA_VISIBLE_DEVICES=0 python3 train.py \
 CUDA_VISIBLE_DEVICES= python export_inference_graph.py \
     --input_type image_tensor \
     --pipeline_config_path ${CONFIG_FILE} \
-    --checkpoint_path ${CKPT_DIR}/model.ckpt-164182 \
+    --checkpoint_path ${CKPT_DIR}/model.ckpt-235663 \
     --inference_graph_path ${ROOT_DIR}/frozen_inference_graph.pb
 
 python object_detection/eval.py \
