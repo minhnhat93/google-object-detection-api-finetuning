@@ -14,7 +14,7 @@ from utils import visualization_utils as vis_util
 
 import argparse
 import cv2
-
+from scipy.misc import imresize
 
 def load_image_into_numpy_array(image):
   (im_width, im_height) = image.size
@@ -32,14 +32,15 @@ def get_all_images_in_dir(path, file_pattern='*.jpg'):
 
 
 def parse_args():
-  parser = argparse.ArgumentParser()
+  parser = argparse.ArgumentParser(description='script used to forward model at tensorflow/models/object-detection in'
+                                               ' batches')
   parser.add_argument('--path_to_ckpt', help='path to frozen graph', type=str)
   parser.add_argument('--labels', help='path to label pbtxt', type=str)
-  parser.add_argument('--num_classes', type=int)
-  parser.add_argument('--img_dir', type=str)
+  parser.add_argument('--num_classes', help='number of classes in pbtxt file', type=int)
+  parser.add_argument('--img_dir', help='input directory contains images to forward', type=str)
   parser.add_argument('--output_dir', default=None, type=str)
   parser.add_argument('--file_ext', default='jpg', type=str)
-  parser.add_argument('--threshold', default=0.1, type=float)
+  parser.add_argument('--threshold', default=0.1, help='objectness score threshold', type=float)
   parser.add_argument('--visualize', dest='visualize', action='store_true')
   parser.add_argument('--no-visualize', dest='visualize', action='store_false')
   parser.set_defaults(visualize=True)
@@ -90,49 +91,84 @@ if __name__ == '__main__':
       scores_tensor = detection_graph.get_tensor_by_name('detection_scores:0')
       classes_tensor = detection_graph.get_tensor_by_name('detection_classes:0')
       num_detections_tensor = detection_graph.get_tensor_by_name('num_detections:0')
-      for image_path in images_set:
-        start_total = timeit.default_timer()
-        image_np = cv2.imread(os.path.join(args.img_dir, image_path))[:, :, ::-1]
-        # the array based representation of the image will be used later in order to prepare the
-        # result image with boxes and labels on it.
-        # Expand dimensions since the model expects images to have shape: [1, None, None, 3]
-        image_np_expanded = np.expand_dims(image_np, axis=0)
-        # Actual detection.
-        start = timeit.default_timer()
-        (boxes, scores, classes, num_detections) = sess.run(
-          [boxes_tensor, scores_tensor, classes_tensor, num_detections_tensor],
-          feed_dict={image_tensor: image_np_expanded})
-        stop = timeit.default_timer()
-        print('Inference {}: {:.6f}s ~ {:.2f} fps'.format(image_path, stop - start, 1.0 / (stop - start)))
-        # Visualization of the results of a detection.
-        boxes = np.squeeze(boxes)
-        classes = np.squeeze(classes).astype(np.int32)
-        scores = np.squeeze(scores)
-        results_for_json = []
-        height, width, _ = image_np.shape
-        for box, cls, score in zip(boxes, classes, scores):
-          if score < args.threshold:
+      # get batch size, height, width of image
+      batch_size = image_tensor._shape_as_list()[0]
+      dummy_imgs = np.random.random((batch_size, 1, 1, 3))
+      reshaped_img_tensor = detection_graph.get_tensor_by_name('Preprocessor/map/TensorArrayStack/TensorArrayGatherV3:0')
+      _, img_height, img_width, _ = sess.run(reshaped_img_tensor, feed_dict={image_tensor: dummy_imgs}).shape
+      # index of image being processed in current iteration
+      image_index = 0
+      while True:
+        # init values for current batch
+        if image_index % batch_size == 0:
+          start = timeit.default_timer()
+          curr_batch = [] # resized images
+          raw_img_in_batch = [] # original images
+          img_path_in_batch = [] # path of images
+          num_img_in_batch = 0
+        # put image into image_tensor
+        if image_index < len(images_set):
+          image_path = images_set[image_index]
+          image_np = cv2.imread(os.path.join(args.img_dir, image_path))[:, :, ::-1]
+          raw_img_in_batch.append(image_np)
+          img_path_in_batch.append(image_path)
+          # resize image to a fixed size to process in batches
+          image_np = cv2.resize(image_np, (img_height, img_width))
+          # the array based representation of the image will be used later in order to prepare the
+          # result image with boxes and labels on it.
+          # Expand dimensions since the model expects images to have shape: [1, None, None, 3]
+          image_np_expanded = np.expand_dims(image_np, axis=0)
+          num_img_in_batch += 1
+        else:
+          # if no more image fill tensor with 0 values
+          image_np_expanded = np.zeros((1, img_height, img_width, 3))
+        curr_batch.append(image_np_expanded)
+        image_index += 1
+
+        # every batch_size images, we do inference 
+        if len(curr_batch) == batch_size:
+          # Actual detection.
+          curr_batch = np.vstack(curr_batch)
+          start_detection = timeit.default_timer()
+          (batch_boxes, batch_scores, batch_classes, batch_num_detections) = sess.run(
+            [boxes_tensor, scores_tensor, classes_tensor, num_detections_tensor],
+            feed_dict={image_tensor: curr_batch})
+          stop = timeit.default_timer()
+          print('Inference {}: {:.6f}s / {} inputs = {:.2f} fps'.format(image_path, stop - start_detection, batch_size, float(batch_size) / (stop - start_detection)))
+          # Visualization of the results of a detection.
+          for j in range(num_img_in_batch):
+            boxes = np.squeeze(batch_boxes[j])
+            classes = np.squeeze(batch_classes[j]).astype(np.int32)
+            scores = np.squeeze(batch_scores[j])
+            image_np = raw_img_in_batch[j]
+            image_path = img_path_in_batch[j]
+            height, width, _ = image_np.shape
+            results_for_json = []
+            for box, cls, score in zip(boxes, classes, scores):
+              if score < args.threshold:
+                break
+              class_name = index_to_name_map[cls]
+              ymin = int(box[0] * height)
+              xmin = int(box[1] * width)
+              ymax = int(box[2] * height)
+              xmax = int(box[3] * width)
+              if args.save_json:
+                results_for_json.append({"label": class_name, "confidence": float('%.2f' % score), "topleft": {"x": xmin, "y": ymin}, "bottomright": {"x": xmax, "y": ymax}})
+            if args.visualize:
+              vis_util.visualize_boxes_and_labels_on_image_array(
+                image_np,
+                boxes,
+                classes,
+                scores,
+                category_index,
+                use_normalized_coordinates=True,
+                line_thickness=2,
+                min_score_thresh=args.threshold)
+              out_img = Image.fromarray(image_np)
+              out_img.save(os.path.join(VISUALIZATION_DIR, os.path.basename(image_path)))
+            if args.save_json:
+              json.dump(results_for_json, open(os.path.join(JSON_DIR, os.path.splitext(image_path)[0] + '.json'), 'w'))
+          stop = timeit.default_timer()
+          print('Total: {:6f} / {} inputs = {:.2f} fps'.format(stop - start, num_img_in_batch, float(num_img_in_batch) / (stop - start)))
+          if image_index >= len(images_set):
             break
-          class_name = index_to_name_map[cls]
-          ymin = int(box[0] * height)
-          xmin = int(box[1] * width)
-          ymax = int(box[2] * height)
-          xmax = int(box[3] * width)
-          if args.save_json:
-            results_for_json.append({"label": class_name, "confidence": float('%.2f' % score), "topleft": {"x": xmin, "y": ymin}, "bottomright": {"x": xmax, "y": ymax}})
-        if args.visualize:
-          vis_util.visualize_boxes_and_labels_on_image_array(
-            image_np,
-            boxes,
-            classes,
-            scores,
-            category_index,
-            use_normalized_coordinates=True,
-            line_thickness=2,
-            min_score_thresh=args.threshold)
-          out_img = Image.fromarray(image_np)
-          out_img.save(os.path.join(VISUALIZATION_DIR, os.path.basename(image_path)))
-        if args.save_json:
-          json.dump(results_for_json, open(os.path.join(JSON_DIR, os.path.splitext(image_path)[0] + '.json'), 'w'))
-        stop = timeit.default_timer()
-        print('Total: {:6f} ~ {:.2f} fps'.format(stop - start_total, 1.0 / (stop - start_total)))

@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-ROOT_DIR=/home/nhat/google-object-detection-api-finetuning/models/faster_rcnn_resnet101_idot
-CONFIG_FILE=${ROOT_DIR}/faster_rcnn_resnet101_idot.config
+ROOT_DIR=/home/nhat/google-object-detection-api-finetuning/models/faster_rcnn_resnet101_with_regularization_idot
+CONFIG_FILE=${ROOT_DIR}/faster_rcnn_resnet101_with_regularization_idot.config
 CKPT_DIR=${ROOT_DIR}/train
 EVAL_DIR=${ROOT_DIR}/eval
-CUDA_VISIBLE_DEVICES=0 python3 train.py \
+CUDA_VISIBLE_DEVICES=1 python3 train.py \
     --logtostderr \
     --pipeline_config_path=${CONFIG_FILE} \
     --train_dir=${CKPT_DIR}
