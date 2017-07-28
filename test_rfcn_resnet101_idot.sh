@@ -9,7 +9,6 @@
 #    --output_dir ~/darknet-finetune/IDOT_dataset/images/rfcn_resnet101_${SPLIT}/0.1 \
 #    --threshold 0.1 \
 #    --no-visualize \
-#    --batch_size 8
 #done
 for SPLIT in train test;
 do

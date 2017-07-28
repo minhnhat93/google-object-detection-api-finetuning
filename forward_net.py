@@ -14,7 +14,23 @@ from utils import visualization_utils as vis_util
 
 import argparse
 import cv2
-from scipy.misc import imresize
+
+COLOR_MAPS = [
+  (255, 62, 150),
+  (0, 250, 154),
+  (128, 128, 105),
+  (255, 128, 0),
+  (139, 26, 26),
+  (198, 113, 113),
+  (0, 206, 209),
+  (178, 58, 238),
+  (255, 20, 147),
+  (238, 169, 184),
+  (102, 205, 170),
+  (179, 238, 58),
+  (205, 205, 0),
+]
+
 
 def load_image_into_numpy_array(image):
   (im_width, im_height) = image.size
@@ -94,7 +110,8 @@ if __name__ == '__main__':
       # get batch size, height, width of image
       batch_size = image_tensor._shape_as_list()[0]
       dummy_imgs = np.random.random((batch_size, 1, 1, 3))
-      reshaped_img_tensor = detection_graph.get_tensor_by_name('Preprocessor/map/TensorArrayStack/TensorArrayGatherV3:0')
+      reshaped_img_tensor = detection_graph.get_tensor_by_name(
+        'Preprocessor/map/TensorArrayStack/TensorArrayGatherV3:0')
       _, img_height, img_width, _ = sess.run(reshaped_img_tensor, feed_dict={image_tensor: dummy_imgs}).shape
       # index of image being processed in current iteration
       image_index = 0
@@ -102,9 +119,9 @@ if __name__ == '__main__':
         # init values for current batch
         if image_index % batch_size == 0:
           start = timeit.default_timer()
-          curr_batch = [] # resized images
-          raw_img_in_batch = [] # original images
-          img_path_in_batch = [] # path of images
+          curr_batch = []  # resized images
+          raw_img_in_batch = []  # original images
+          img_path_in_batch = []  # path of images
           num_img_in_batch = 0
         # put image into image_tensor
         if image_index < len(images_set):
@@ -134,15 +151,17 @@ if __name__ == '__main__':
             [boxes_tensor, scores_tensor, classes_tensor, num_detections_tensor],
             feed_dict={image_tensor: curr_batch})
           stop = timeit.default_timer()
-          print('Inference {}: {:.6f}s / {} inputs = {:.2f} fps'.format(image_path, stop - start_detection, batch_size, float(batch_size) / (stop - start_detection)))
+          print('Inference {}: {:.6f}s / {} inputs = {:.2f} fps'.format(image_path, stop - start_detection, batch_size,
+                                                                        float(batch_size) / (stop - start_detection)))
           # Visualization of the results of a detection.
           for j in range(num_img_in_batch):
             boxes = np.squeeze(batch_boxes[j])
             classes = np.squeeze(batch_classes[j]).astype(np.int32)
             scores = np.squeeze(batch_scores[j])
-            image_np = raw_img_in_batch[j]
+            image_np = raw_img_in_batch[j][:, :, ::-1]
             image_path = img_path_in_batch[j]
             height, width, _ = image_np.shape
+            thick = int((height + width) // 300)
             results_for_json = []
             for box, cls, score in zip(boxes, classes, scores):
               if score < args.threshold:
@@ -153,22 +172,19 @@ if __name__ == '__main__':
               ymax = int(box[2] * height)
               xmax = int(box[3] * width)
               if args.save_json:
-                results_for_json.append({"label": class_name, "confidence": float('%.2f' % score), "topleft": {"x": xmin, "y": ymin}, "bottomright": {"x": xmax, "y": ymax}})
+                results_for_json.append({"label": class_name, "confidence": float('%.2f' % score),
+                                         "topleft": {"x": xmin, "y": ymin}, "bottomright": {"x": xmax, "y": ymax}})
+              if args.visualize:
+                color = COLOR_MAPS[cls % len(COLOR_MAPS)]
+                cv2.rectangle(image_np, (xmin, ymin), (xmax, ymax), color, thick)
+                cv2.putText(image_np, class_name + ' {}%'.format(int(score * 100)), (xmin, ymin - 10), 0, 1e-3 * height,
+                            color, thick // 2)
             if args.visualize:
-              vis_util.visualize_boxes_and_labels_on_image_array(
-                image_np,
-                boxes,
-                classes,
-                scores,
-                category_index,
-                use_normalized_coordinates=True,
-                line_thickness=2,
-                min_score_thresh=args.threshold)
-              out_img = Image.fromarray(image_np)
-              out_img.save(os.path.join(VISUALIZATION_DIR, os.path.basename(image_path)))
+              cv2.imwrite(os.path.join(VISUALIZATION_DIR, os.path.basename(image_path)), image_np)
             if args.save_json:
               json.dump(results_for_json, open(os.path.join(JSON_DIR, os.path.splitext(image_path)[0] + '.json'), 'w'))
           stop = timeit.default_timer()
-          print('Total: {:6f} / {} inputs = {:.2f} fps'.format(stop - start, num_img_in_batch, float(num_img_in_batch) / (stop - start)))
+          print('Total: {:6f} / {} inputs = {:.2f} fps'.format(stop - start, num_img_in_batch,
+                                                               float(num_img_in_batch) / (stop - start)))
           if image_index >= len(images_set):
             break
